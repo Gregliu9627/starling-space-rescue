@@ -1,1 +1,54 @@
-# starling-space-rescue
+# STARLING · 星际小队
+
+一个适合 iPad 横屏游玩的太空飞船英语游戏。使用 HTML、CSS、JavaScript 和 Canvas 编写，无需构建、账号或游戏服务器。
+
+## 操作与任务
+
+- 用手指按住空白区域拖动飞船，激光自动发射。
+- 点击右下角开启护盾；右上角可以暂停或关闭声音。
+- 通过「再听一次」重播英文任务指令。
+- 完成收集星星、颜色瞄准、方位救援与守卫挑战。
+- 电脑也支持方向键 / WASD 移动、空格键开启护盾。
+
+任务包括 `three stars`、`red`、`blue`、`green`、`behind` 和 `in front of`。
+答错后会解释词义并允许重试；护甲耗尽后可修复飞船，继续当前任务。
+
+## 发布到 GitHub Pages
+
+1. 将本仓库文件上传到 `main` 分支，确保 `index.html` 位于仓库根目录。
+2. 在仓库中打开 **Settings → Pages**。
+3. 在 **Build and deployment → Source** 选择 **Deploy from a branch**。
+4. 选择 **main** 和 **/(root)**，点击 **Save**。
+5. 等 GitHub 完成部署，在 Pages 页面点击 **Visit site**，获得实际游戏网址。
+
+免费账号通常需要使用公开仓库。游戏网站公开可访问，访客无需 GitHub 或 ChatGPT 账号。
+GitHub Pages 在不同地区、网络下的访问情况需要实际测试。
+
+参考：[GitHub Pages 发布来源配置](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)。
+
+## iPad 使用
+
+使用 Safari 横屏打开。首次开始时先点击「听听英文语音」，确认设备音量和语音播放。
+英文由设备内置的 `SpeechSynthesis` 朗读，不需要麦克风。可用音色及播放效果由设备和浏览器决定。
+语音不可用时仍保留英文字幕。实际 iPad 的语音和性能仍需要实机确认。
+
+## 学习记录
+
+家长舱显示任务完成次数、无误完成次数、选错次数和主动重听次数。
+这些是练习记录，不代表已经掌握单词。
+
+记录仅存于当前浏览器的 `localStorage`，不上传到 GitHub，也不跨设备同步。
+浏览器清理数据、换用浏览器或换网址后，原来的记录不会自动迁移。
+页面不使用第三方统计或外部图片、字体、脚本资源。
+
+## 本地运行与检查
+
+```sh
+npm run dev
+npm run check
+npm test
+```
+
+本地预览端口为 `4173`，需要 Python 3；语法与逻辑检查需要 Node.js。没有需要安装的 npm 依赖。
+
+游戏原型已经过 Chromium 触摸模拟的完整通关测试，覆盖拖动、星星收集、错误反馈、重听、暂停、护盾、方位任务、守卫和本地记录持久化。模拟视口包括 1024×768、1133×744 和 768×1024；这不等同于真实 Safari 测试。
