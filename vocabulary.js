@@ -1,4 +1,4 @@
-import { THEMES as EXTRA_THEMES, EXTRA_VOCABULARY } from './word-bank.js?v=4';
+import { THEMES as EXTRA_THEMES, EXTRA_VOCABULARY } from './word-bank.js?v=5';
 export const READING_KEY='starling-reading-v1';
 export const THEMES=Object.freeze({space:{label:'太空入門',description:'原來救援任務中的六個詞'},...EXTRA_THEMES});
 const CORE_VOCABULARY={

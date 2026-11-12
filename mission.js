@@ -1,4 +1,4 @@
-import { normalizeSettings } from './settings.js?v=4';
+import { normalizeSettings } from './settings.js?v=5';
 export const COLORS = {red:'#ff7d7b',blue:'#75c9fa',green:'#b5eb8c'};
 export const WORDS = {
   stars:{en:'three stars',zh:'三颗星星'},red:{en:'red',zh:'红色'},blue:{en:'blue',zh:'蓝色'},green:{en:'green',zh:'绿色'},

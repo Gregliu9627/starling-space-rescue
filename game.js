@@ -1,8 +1,9 @@
-import { COLORS, WORDS, MISSIONS, configuredMission, evaluateAnswer, newProgress, loadProgress, recordTask } from './mission.js?v=4';
-import { SETTINGS_KEY, PRESETS, SETTING_LIMITS, DEFAULT_SETTINGS, normalizeSettings, loadSettings, presetName, settingsSummary, hazardWave } from './settings.js?v=4';
-import { READING_KEY, VOCABULARY, highlightInstruction, picture, readingChoices, newReading, loadReading, recordReading, CORE_KEYS, THEMES, wordKeys, practiceKeys, escapeHtml } from './vocabulary.js?v=4';
+import { COLORS, WORDS, MISSIONS, configuredMission, evaluateAnswer, newProgress, loadProgress, recordTask } from './mission.js?v=5';
+import { SETTINGS_KEY, PRESETS, SETTING_LIMITS, DEFAULT_SETTINGS, normalizeSettings, loadSettings, presetName, settingsSummary, hazardWave } from './settings.js?v=5';
+import { READING_KEY, VOCABULARY, highlightInstruction, picture, readingChoices, newReading, loadReading, recordReading, CORE_KEYS, THEMES, wordKeys, practiceKeys, escapeHtml } from './vocabulary.js?v=5';
 
-import { wordMission } from './word-flight.js?v=4';
+import { wordMission, flightTargets } from './word-flight.js?v=5';
+import { LEVELS_KEY, LEVELS, getLevel, levelPlan, nextLevelId, newCampaign, loadCampaign, completeLevel } from './levels.js?v=5';
 
 const $=id=>document.getElementById(id);
 const canvas=$('space'),ctx=canvas.getContext('2d');
@@ -13,7 +14,10 @@ let storageAvailable=true;
 let reading;try{reading=loadReading(localStorage.getItem(READING_KEY));}catch{reading=newReading();}
 const seenWords=new Set();let quiz=null;
 let libraryState={theme:'all',level:'starter',search:'',page:0};
-let activeRun={kind:'rescue',keys:[]};
+let activeRun={kind:'rescue',keys:[],levelId:null};
+let campaign;try{campaign=loadCampaign(localStorage.getItem(LEVELS_KEY));}catch{campaign=newCampaign();}
+const saveCampaign=()=>{try{localStorage.setItem(LEVELS_KEY,JSON.stringify(campaign));}catch{storageAvailable=false;}};
+let levelView={theme:'all',page:0},pendingLevel=null;
 const runLength=()=>activeRun.kind==='vocab'?activeRun.keys.length:MISSIONS.length;
 const saveReading=()=>{try{localStorage.setItem(READING_KEY,JSON.stringify(reading));}catch{storageAvailable=false;}};
 let settings;
@@ -27,7 +31,7 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const mission=()=>activeMission;
 const spokenInstruction=()=>mission().kind==='vocab'?`Find ${VOCABULARY[mission().key].word}.`:mission().text;
-const fieldTop=()=>height<660?185:225;
+const fieldTop=()=>height>width?270:height<660?185:225;
 const playerMin=()=>Math.max(fieldTop()+180,height*.49);
 const save=()=>{try{localStorage.setItem(STORAGE_KEY,JSON.stringify(progress));}catch{storageAvailable=false;}};
 
@@ -151,6 +155,35 @@ function finishReadingQuiz(){
   $('reading-done').onclick=()=>{stopSpeech();quiz.back();};$('reading-again').onclick=()=>startReadingQuiz(quiz.back,quiz.pool);
   document.querySelectorAll('[data-review-card]').forEach(b=>b.onclick=()=>showWordCard(b.dataset.reviewCard,finishReadingQuiz));
 }
+function showLevelMap(){
+  if(state.mode!=='home')returnHome();
+  stopSpeech();
+  openModal(`<div class="modal-topline"><span class="overline">MISSION SELECT / 射擊選關</span><button id="levels-close" class="close-modal" aria-label="关闭选关">×</button></div><div class="level-map-heading"><h2 id="modal-title">今天飛去哪一關？</h2><span>${LEVELS.length} 關 · ${Object.keys(VOCABULARY).length} 詞</span></div><p class="level-map-intro">全部關卡都能選。每關一組單詞，瞄準帶英文的太空無人機。</p><div class="level-toolbar"><label>選主題<select id="level-theme"><option value="all">全部主題</option>${[...new Set(LEVELS.map(l=>l.theme))].map(theme=>`<option value="${theme}" ${levelView.theme===theme?'selected':''}>${THEMES[theme].label}</option>`).join('')}</select></label><button id="random-level" class="secondary-button">⤨ 隨機混合關</button></div><div class="library-pagebar"><span id="level-page-label" role="status"></span><div><button id="level-prev" aria-label="上一页关卡">←</button><button id="level-next" aria-label="下一页关卡">→</button></div></div><div id="level-grid" class="level-grid"></div><div class="level-map-footer"><span id="level-completion"></span><button id="classic-training" class="text-button">經典救援練習 ↗</button></div>`);
+  $('modal-content').classList.add('level-panel');
+  const render=()=>{
+    const levels=LEVELS.filter(l=>levelView.theme==='all'||l.theme===levelView.theme),pages=Math.max(1,Math.ceil(levels.length/6));levelView.page=Math.max(0,Math.min(levelView.page,pages-1));
+    $('level-page-label').textContent=`${levels.length} 關 · 第 ${levelView.page+1} / ${pages} 頁`;
+    $('level-prev').disabled=levelView.page===0;$('level-next').disabled=levelView.page===pages-1;
+    $('level-completion').textContent=`已完成 ${LEVELS.filter(l=>campaign.completed[l.id]).length} / ${LEVELS.length} 關`;
+    $('level-grid').innerHTML=levels.slice(levelView.page*6,levelView.page*6+6).map(level=>`<button class="level-tile ${campaign.lastLevelId===level.id?'last-played':''}" data-level="${level.id}"><div><span>MISSION ${String(LEVELS.indexOf(level)+1).padStart(2,'0')}</span><small>${campaign.completed[level.id]?'✓ 已完成':'可出發'}</small></div><b>${level.title}</b><p>${level.keys.map(k=>VOCABULARY[k].word).join(' · ')}</p><span class="level-tile-foot">${level.keys.length} 詞 · ${level.keys.every(k=>VOCABULARY[k].level==='starter')?'起步':level.keys.every(k=>VOCABULARY[k].level==='extend')?'拓展':'混合'} <i>→</i></span></button>`).join('');
+    document.querySelectorAll('[data-level]').forEach(button=>button.onclick=()=>showLevelBriefing(button.dataset.level));
+  };
+  $('level-theme').onchange=e=>{levelView.theme=e.target.value;levelView.page=0;render();};
+  $('level-prev').onclick=()=>{levelView.page--;render();};$('level-next').onclick=()=>{levelView.page++;render();};
+  $('levels-close').onclick=closeModal;$('random-level').onclick=()=>showLevelBriefing('random');$('classic-training').onclick=showBriefing;
+  render();
+}
+function showLevelBriefing(id,keepPlan=false){
+  if(!keepPlan||pendingLevel?.id!==id)pendingLevel=levelPlan(id,pendingLevel?.keys||activeRun.keys);
+  const plan=pendingLevel;
+  openModal(`<div class="modal-topline"><span class="overline">READY TO LAUNCH / 射擊任務</span><button id="level-brief-close" class="close-modal" aria-label="返回选关">×</button></div><h2 id="modal-title">${plan.title}</h2><p>這關要找的 ${plan.keys.length} 個詞都在這裏。<br>每詞先看卡片，再駕駛飛船瞄準英文無人機。</p><div class="level-word-preview">${plan.keys.map(key=>`<button data-level-word="${key}"><b>${VOCABULARY[key].word}</b><span>${VOCABULARY[key].zh}</span></button>`).join('')}</div><p class="level-rules">隨機出場 · 命中後換干擾詞和位置 · 每詞命中 ${settings.targetHits} 次</p><button id="level-difficulty" class="brief-difficulty">⚙ ${presetName(settings)}難度 <span>調整 ↗</span></button>${id==='random'?'<button id="reroll-level" class="secondary-button">⤨ 換一組單詞</button>':''}<button id="begin-level" class="launch-button">駕駛飛船，開始這關 →</button><button id="level-back" class="quiet-button">返回選關</button>`);
+  $('modal-content').classList.add('level-brief-panel');
+  document.querySelectorAll('[data-level-word]').forEach(b=>b.onclick=()=>showWordCard(b.dataset.levelWord,()=>showLevelBriefing(id,true)));
+  $('level-brief-close').onclick=showLevelMap;$('level-back').onclick=showLevelMap;
+  $('level-difficulty').onclick=()=>showDifficulty('level');
+  if($('reroll-level'))$('reroll-level').onclick=()=>showLevelBriefing('random');
+  $('begin-level').onclick=()=>startRun(plan.keys,plan.id);
+}
 function refreshDifficultySummary(){
   $('difficulty-name').textContent=presetName(settings);
   $('difficulty-summary').textContent=settingsSummary(settings);
@@ -171,7 +204,7 @@ function showDifficulty(origin='home'){
     }
     document.querySelectorAll('[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(Object.keys(DEFAULT_SETTINGS).every(k=>draft[k]===PRESETS[b.dataset.preset][k]))));
   };
-  const back=()=>{if(origin==='pause')pauseGame();else if(origin==='briefing')showBriefing();else closeModal();};
+  const back=()=>{if(origin==='pause')pauseGame();else if(origin==='briefing')showBriefing();else if(origin==='level')showLevelBriefing(pendingLevel.id,true);else closeModal();};
   for(const [key] of fields)$(`setting-${key}`).oninput=e=>{draft=normalizeSettings({...draft,[key]:Number(e.target.value)});refresh();};
   document.querySelectorAll('[data-adjust]').forEach(b=>b.onclick=()=>{const key=b.dataset.adjust;draft=normalizeSettings({...draft,[key]:draft[key]+Number(b.dataset.direction)*SETTING_LIMITS[key].step});refresh();});
   document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{draft=normalizeSettings(PRESETS[b.dataset.preset]);refresh();});
@@ -186,9 +219,10 @@ function showBriefing(){
   $('brief-difficulty').onclick=()=>showDifficulty('briefing');
   $('begin').onclick=startRun;$('brief-back').onclick=()=>{stopSpeech();closeModal();};
 }
-function startRun(wordList=null){
-  activeRun=Array.isArray(wordList)?{kind:'vocab',keys:[...new Set(wordList)].filter(k=>Object.hasOwn(VOCABULARY,k)).slice(0,6)}:{kind:'rescue',keys:[]};
+function startRun(wordList=null,levelId=null){
+  activeRun=Array.isArray(wordList)?{kind:'vocab',keys:[...new Set(wordList)].filter(k=>Object.hasOwn(VOCABULARY,k)).slice(0,6),levelId}:{kind:'rescue',keys:[],levelId:null};
   if(activeRun.kind==='vocab'&&!activeRun.keys.length)return;
+  if(levelId){campaign.lastLevelId=levelId;saveCampaign();}
   closeModal();unlockAudio();
   Object.assign(state,{mode:'playing',index:0,count:0,score:0,hearts:3,elapsed:0,clock:0,phaseTime:0,shotTime:0,hazardTime:0,transition:0,wrongCooldown:0,shield:3,shieldCooldown:0,invincible:3,feedback:0,mistakes:0,replays:0,runMistakes:0,runReplays:0,rescued:0});
   targets=[];hazards=[];bullets=[];particles=[];keys.clear();pointer=null;
@@ -207,10 +241,10 @@ function setMission(index){
   $('task-tag').textContent=['MISSION 01 / 收集能量','MISSION 02 / 听音瞄准','MISSION 03 / 营救伙伴','MISSION 04 / 守卫挑战'][m.section];
   $('stage-progress').innerHTML=['能量','瞄准','救援','守卫'].map((label,i)=>`<div class="stage-marker ${i===m.section?'active':i<m.section?'done':''}"><b>${i<m.section?'✓':i+1}</b><span>${label}</span></div>`).join('');
   if(m.kind==='vocab'){
-    $('task-tag').textContent=`WORD FLIGHT / ${THEMES[word.theme].label}`;
+    $('task-tag').textContent=activeRun.levelId?`MISSION / ${getLevel(activeRun.levelId)?.title||'隨機混合關'}`:`WORD FLIGHT / ${THEMES[word.theme].label}`;
     $('stage-progress').innerHTML=activeRun.keys.map((key,i)=>`<div class="stage-marker ${i===index?'active':i<index?'done':''}"><b>${i<index?'✓':i+1}</b></div>`).join('');
   }
-  if(m.kind==='vocab')targets=readingChoices(m.key).map((key,slot)=>({key,slot,active:true}));
+  if(m.kind==='vocab')targets=flightTargets(m.key,activeRun.keys);
   else if(m.kind==='collect')targets=Array.from({length:3},(_,i)=>({key:'star',slot:i,active:true}));
   else if(m.kind==='position')targets=shuffle(['behind','front']).map((key,slot)=>({key,slot,active:true}));
   else targets=shuffle(Object.keys(COLORS)).map((key,slot)=>({key,slot,active:true}));
@@ -228,7 +262,7 @@ function layoutTargets(){
     if(m.kind==='collect'){t.baseX=width*(.26+t.slot*.24);t.y=clamp(height*(.57+(t.slot%2)*.10),playerMin()+10,height-140);t.r=23;}
     else if(m.kind==='position'){t.baseX=width*(.30+t.slot*.40);t.y=fieldTop()+100;t.r=39;}
     else if(m.kind==='boss'){t.y=fieldTop()+112;t.r=27;}
-    else{t.y=fieldTop()+65;t.r=m.kind==='vocab'?Math.min(78,width*.11):33;}
+    else{t.y=fieldTop()+65;t.r=m.kind==='vocab'?Math.min(102.5,width*.125):33;}
     t.x=t.baseX;t.cooldown=0;
   }
 }
@@ -280,7 +314,7 @@ function answer(target){
 }
 
 function finishRun(){
-  state.mode='results';stopSpeech();if(activeRun.kind==='vocab'){reading.flightRuns++;saveReading();}else{progress.runs++;save();}pointer=null;keys.clear();
+  state.mode='results';stopSpeech();if(activeRun.kind==='vocab'){reading.flightRuns++;saveReading();if(activeRun.levelId){completeLevel(campaign,activeRun.levelId);saveCampaign();}}else{progress.runs++;save();}pointer=null;keys.clear();
   speak('Mission complete! You are a space hero!');
   showResults();
 }
@@ -296,10 +330,13 @@ function showResults(){
   $('result-home').onclick=returnHome;$('result-replay').onclick=startRun;
 }
 function showFlightResults(){
-  openModal(`<div class="modal-symbol">✦</div><span class="overline">WORD FLIGHT COMPLETE</span><h2 id="modal-title">這次巡航，收集了 ${activeRun.keys.length} 個詞！</h2><p>點卡片再聽一遍，或試試不開飛船也能認出它們。</p><div class="word-grid">${activeRun.keys.map(key=>`<button class="word-chip" data-flight-review="${key}">${VOCABULARY[key].word}<small>${VOCABULARY[key].zh}</small></button>`).join('')}</div><button id="flight-reading" class="launch-button">認一認這些詞 →</button><button id="flight-more" class="secondary-button">選主題，繼續探索</button><button id="flight-home" class="quiet-button">返回空間站</button>`);
+  const id=activeRun.levelId,next=id==='random'?'random':nextLevelId(id),title=getLevel(id)?.title||(id==='random'?'隨機混合關':'詞彙巡航');
+  openModal(`<div class="modal-symbol">✦</div><span class="overline">MISSION COMPLETE / 射擊過關</span><h2 id="modal-title">${title}，完成！</h2><p>這關練習了 ${activeRun.keys.length} 個詞。下一關，換一組新單詞！</p><div class="word-grid">${activeRun.keys.map(key=>`<button class="word-chip" data-flight-review="${key}">${VOCABULARY[key].word}<small>${VOCABULARY[key].zh}</small></button>`).join('')}</div>${next?`<button id="flight-next" class="launch-button">${next==='random'?'下一組隨機詞':`下一關：${getLevel(next).title}`} →</button>`:''}<button id="flight-more" class="${next?'secondary-button':'launch-button'}">自選其他關卡 →</button>${id?'<button id="flight-replay" class="secondary-button">再玩這關 · 重排出場順序</button>':''}<button id="flight-reading" class="secondary-button">認一認這些詞</button><button id="flight-home" class="quiet-button">返回空間站</button>`);
   document.querySelectorAll('[data-flight-review]').forEach(b=>b.onclick=()=>showWordCard(b.dataset.flightReview,showFlightResults));
   $('flight-reading').onclick=()=>startReadingQuiz(showFlightResults,activeRun.keys);
-  $('flight-more').onclick=()=>{returnHome();showLibrary();};$('flight-home').onclick=returnHome;
+  $('flight-more').onclick=()=>{returnHome();showLevelMap();};$('flight-home').onclick=returnHome;
+  if($('flight-next'))$('flight-next').onclick=()=>{const plan=levelPlan(next,activeRun.keys);pendingLevel=plan;showLevelBriefing(next,true);};
+  if($('flight-replay'))$('flight-replay').onclick=()=>{const plan=id==='random'?{id,title,keys:shuffle(activeRun.keys)}:levelPlan(id,activeRun.keys);pendingLevel=plan;showLevelBriefing(id,true);};
 }
 function returnHome(){
   state.mode='home';stopSpeech();closeModal();$('home').hidden=false;$('play').hidden=true;pointer=null;keys.clear();hazards=[];bullets=[];particles=[];targets=[];$('start').focus();
@@ -313,6 +350,7 @@ function pauseGame(){
   $('resume').insertAdjacentHTML('beforebegin','<button id="pause-word" class="secondary-button">♫ 再看看这个单词</button>');
   $('pause-word').onclick=()=>openMissionWord();
   $('resume').onclick=()=>{closeModal();state.mode='playing';state.invincible=Math.max(2,state.invincible);state.aimGrace=Math.max(.75,state.aimGrace);speak(spokenInstruction());};
+  $('resume').insertAdjacentHTML('afterend','<button id="pause-levels" class="secondary-button">換一關 →</button>');$('pause-levels').onclick=()=>{returnHome();showLevelMap();};
   $('leave').onclick=returnHome;
 }
 function repairShip(){
@@ -328,11 +366,11 @@ function showParent(){
   $('parent-done').insertAdjacentHTML('beforebegin',`<div class="reading-parent-summary"><b>認詞練習 · 首次選對 ${summary.firstTry} / ${summary.completed} 次</b><p>完成 ${reading.sessions} 轮认词挑战。战斗里有图文提示；这里单独记录看图或释义选英文的表现。</p><p>詞彙巡航完成 ${reading.flightRuns} 輪，練過 ${Object.keys(reading.flightRecords).length} 個詞。巡航有詞卡提示，單獨記錄。</p>${Object.entries(reading.records).slice(-12).map(([key,r])=>`<span>${VOCABULARY[key].word}：${r.firstTry} / ${r.completed}</span>`).join('')}<p>186 詞，按香港小一至小三常見主題編選。「起步／拓展」是遊戲分組，可按孩子程度選擇。</p><p><a class="curriculum-link" href="https://www.edb.gov.hk/attachment/en/curriculum-development/kla/eng-edu/Curriculum%20Document/Pri_ELCG_Primary_1-6_2025.pdf" target="_blank" rel="noopener noreferrer">課程方向參考：香港教育局英語課程指引 ↗</a></p><button id="parent-library" class="secondary-button">進單詞舱查看各詞記錄 →</button></div>`);
   $('parent-library').onclick=()=>showLibrary(showParent);
   $('parent-close').onclick=closeModal;$('parent-done').onclick=closeModal;
-  $('clear-progress').onclick=()=>{openModal(`<div class="overline">LOCAL RECORDS</div><h2 id="modal-title">清除这台设备的记录？</h2><p>救援、认词挑战和词汇巡航的练习记录都会归零。</p><button id="keep-records" class="launch-button">保留记录</button><button id="confirm-clear" class="secondary-button">确认清除</button>`);$('keep-records').onclick=showParent;$('confirm-clear').onclick=()=>{progress=newProgress();reading=newReading();save();saveReading();showParent();};};
+  $('clear-progress').onclick=()=>{openModal(`<div class="overline">LOCAL RECORDS</div><h2 id="modal-title">清除这台设备的记录？</h2><p>救援、认词挑战和词汇巡航的练习记录都会归零。</p><button id="keep-records" class="launch-button">保留记录</button><button id="confirm-clear" class="secondary-button">确认清除</button>`);$('keep-records').onclick=showParent;$('confirm-clear').onclick=()=>{progress=newProgress();reading=newReading();campaign=newCampaign();save();saveReading();saveCampaign();showParent();};};
 }
 
-$('start').onclick=showBriefing;$('open-parent').onclick=showParent;$('pause').onclick=pauseGame;
-$('open-words').onclick=()=>showLibrary();$('start-words').onclick=()=>showLibrary();$('focus-word').onclick=()=>openMissionWord();
+$('start').onclick=showLevelMap;$('open-parent').onclick=showParent;$('pause').onclick=pauseGame;
+$('open-words').onclick=()=>showLibrary();$('start-words').onclick=()=>showLevelBriefing('random');$('focus-word').onclick=()=>openMissionWord();
 $('difficulty').onclick=()=>showDifficulty('home');refreshDifficultySummary();
 $('dismiss-rotate').onclick=()=>$('rotate-hint').classList.add('dismissed');
 $('repeat').onclick=()=>{
@@ -381,9 +419,10 @@ function update(dt){
   for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;}particles=particles.filter(p=>p.life>0);
   if(state.transition>0){state.transition-=dt;hazards=[];if(state.transition<=0){if(state.index+1>=runLength())finishRun();else setMission(state.index+1);}return;}
   const m=mission();
+  if(m.kind==='vocab'){const waiting=targets.find(t=>t.respawn>0);if(waiting){waiting.respawn-=dt;if(waiting.respawn<=0){targets=flightTargets(m.key,activeRun.keys,targets);bullets=[];layoutTargets();}}}
   for(const t of targets){
     t.cooldown=Math.max(0,t.cooldown-dt);
-    if(t.respawn){t.respawn-=dt;if(t.respawn<=0){t.active=true;t.respawn=0;const shift=1+Math.floor(Math.random()*(targets.length-1));targets.forEach(v=>v.slot=(v.slot+shift)%targets.length);bullets=[];layoutTargets();}}
+    if(m.kind!=='vocab'&&t.respawn){t.respawn-=dt;if(t.respawn<=0){t.active=true;t.respawn=0;const shift=1+Math.floor(Math.random()*(targets.length-1));targets.forEach(v=>v.slot=(v.slot+shift)%targets.length);bullets=[];layoutTargets();}}
     t.x=t.baseX+(['color','boss','vocab'].includes(m.kind)?Math.sin(state.phaseTime*.5+t.slot)*Math.min(25,width*.025):0);
     if(t.active&&m.kind==='collect'&&Math.hypot(ship.x-t.x,ship.y-t.y)<t.r+23)answer(t);
   }
@@ -391,7 +430,7 @@ function update(dt){
   if(state.shotTime>.24&&state.phaseTime>1.7&&state.wrongCooldown<=0&&state.aimGrace<=0){state.shotTime=0;bullets.push({x:ship.x,y:ship.y-36});if(state.elapsed%2<.25)tone(560,.04,'triangle',.009);}
   for(const b of bullets){
     b.y-=600*dt;
-    if(m.kind!=='collect')for(const t of targets){if(t.active&&Math.abs(b.x-t.x)<t.r&&Math.abs(b.y-t.y)<t.r){answer(t);b.y=-100;break;}}
+    if(m.kind!=='collect')for(const t of targets){if(t.active&&Math.abs(b.x-t.x)<t.r&&Math.abs(b.y-t.y)<(m.kind==='vocab'?38:t.r)){answer(t);b.y=-100;break;}}
     for(const h of hazards){if(Math.hypot(b.x-h.x,b.y-h.y)<h.r+5){h.dead=true;b.y=-100;burst(h.x,h.y,'#90bec7',8);break;}}
   }
   bullets=bullets.filter(b=>b.y>-20);
@@ -447,10 +486,15 @@ function drawDrone(t){
 function drawWordTarget(t){
   const w=VOCABULARY[t.key],cardWidth=Math.min(205,width*.25);
   ctx.save();ctx.translate(t.x,t.y);ctx.globalAlpha=t.cooldown>0?.4:1;
-  roundedRect(-cardWidth/2,-34,cardWidth,68,14,'#142f43','#83bdc3');
+  const edge=cardWidth/2;
+  path([[-edge+6,-18],[-edge-13,-35],[-edge-18,17],[-edge+6,23]],'#24445a','#71a9b5');
+  path([[edge-6,-18],[edge+13,-35],[edge+18,17],[edge-6,23]],'#24445a','#71a9b5');
+  roundedRect(-24,-48,48,21,9,'#254c5e','#83bdc3');circle(-9,-38,3,'#c1f3c0');circle(9,-38,3,'#c1f3c0');
+  roundedRect(-edge,-30,cardWidth,66,14,'#142f43','#83bdc3');
+  path([[-13,36],[0,49+Math.sin(ambient*8+t.slot)*5],[13,36]],'#9bdad533');
   let fontSize=24;ctx.font=`600 ${fontSize}px -apple-system, sans-serif`;
   while(ctx.measureText(w.word).width>cardWidth-20&&fontSize>14){fontSize--;ctx.font=`600 ${fontSize}px -apple-system, sans-serif`;}
-  ctx.fillStyle='#e4f1ec';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(w.word,0,0);ctx.restore();
+  ctx.fillStyle='#e4f1ec';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(w.word,0,3);ctx.restore();
 }
 function drawRock(x,y,r,rot=0){
   ctx.save();ctx.translate(x,y);ctx.rotate(rot);const points=[];for(let i=0;i<9;i++){const angle=i*Math.PI*2/9,rad=r*(.86+(i%3)*.07);points.push([Math.cos(angle)*rad,Math.sin(angle)*rad]);}path(points,'#43576b','#718598');circle(-r*.23,-r*.17,r*.2,'#31455a');circle(r*.28,r*.22,r*.14,'#34485b');ctx.restore();
@@ -501,4 +545,4 @@ function frame(now){
 requestAnimationFrame(frame);
 
 // Read-only snapshot for browser interaction tests; contains no player identity.
-export function inspectGame(){return JSON.parse(JSON.stringify({mode:state.mode,index:state.index,count:state.count,goal:mission().goal,score:state.score,hearts:state.hearts,elapsed:state.elapsed,transition:state.transition,shield:state.shield,shieldCooldown:state.shieldCooldown,mistakes:state.runMistakes,replays:state.runReplays,settings,ship,targets,hazards:hazards.map(h=>({...h,effectiveSpeed:h.vy*settings.meteorSpeed})),progress,reading,activeRun,missionKey:mission().key,seenWords:[...seenWords],quiz:quiz?{key:quiz.key,index:quiz.index,order:quiz.order,options:quiz.options,answered:quiz.answered,firstTry:quiz.firstTry,finished:quiz.finished}:null}));}
+export function inspectGame(){return JSON.parse(JSON.stringify({mode:state.mode,index:state.index,count:state.count,goal:mission().goal,score:state.score,hearts:state.hearts,elapsed:state.elapsed,transition:state.transition,shield:state.shield,shieldCooldown:state.shieldCooldown,mistakes:state.runMistakes,replays:state.runReplays,settings,ship,targets,hazards:hazards.map(h=>({...h,effectiveSpeed:h.vy*settings.meteorSpeed})),progress,reading,campaign,activeRun,missionKey:mission().key,seenWords:[...seenWords],quiz:quiz?{key:quiz.key,index:quiz.index,order:quiz.order,options:quiz.options,answered:quiz.answered,firstTry:quiz.firstTry,finished:quiz.finished}:null}));}

@@ -32,7 +32,7 @@ async function dismissLesson(){
 }
 
 const change=async(selector,value)=>{await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.value=${JSON.stringify(value)};e.dispatchEvent(new Event(e.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`);await sleep(100);};
-const getBank=()=>evaluate("import('./vocabulary.js?v=4').then(m=>m.VOCABULARY)");
+const getBank=()=>evaluate("import('./vocabulary.js?v=5').then(m=>m.VOCABULARY)");
 try{
   await cdp('Page.enable');await cdp('Runtime.enable');
   await cdp('Emulation.setDeviceMetricsOverride',{width:1024,height:768,deviceScaleFactor:1,mobile:true});
@@ -42,7 +42,7 @@ try{
   await cdp('Page.reload');await sleep(600);
   assert.equal((await snapshot()).reading.records.red.completed,2);assert.equal((await snapshot()).progress.runs,3);
   const bank=await getBank();assert.equal(Object.keys(bank).length,186);
-  await shot('expanded-home.png');await tap('#start-words');await assertFits('#library-quiz');
+  await shot('expanded-home.png');await tap('#open-words');await assertFits('#library-quiz');
   await change('#word-theme','animals');await change('#word-level','all');
   assert.equal(await evaluate("document.querySelectorAll('[data-card]').length"),6);
   const firstPage=await evaluate("[...document.querySelectorAll('[data-card]')].map(b=>b.dataset.card)");

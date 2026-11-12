@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
+if(process.argv.includes('--levels')){await import('./levels-browser-qa.mjs');process.exit(0);}
 if(process.argv.includes('--expanded')){await import('./vocabulary-browser-qa.mjs');process.exit(0);}
 
 const output=new URL('../qa/',import.meta.url);await fs.mkdir(output,{recursive:true});
@@ -63,7 +64,7 @@ try{
   await tap('[data-card=behind]');await assertFits('#word-continue');await shot('reading-behind-card.png');
   assert.equal(await evaluate("document.querySelector('#modal-title').textContent"),'behind');
   await tap('#word-speak');await tap('#word-continue');await tap('#library-close');
-  await tap('#start');await tap('#begin');
+  await tap('#start');await tap('#classic-training');await tap('#begin');
   assert.equal(await evaluate("document.querySelector('#modal-title').textContent"),'star');
   await shot('reading-first-word.png');await dismissLesson();
   const firstWave=await waitFor(async()=>{const s=await snapshot();return s.hazards.length?s.hazards:null;},'six meteors in a wave');
@@ -80,6 +81,11 @@ try{
   assert.ok(await evaluate("document.querySelector('#focus-word').textContent.includes('红色')"));
   await tap('#focus-word');await dismissLesson();await shot('reading-battle-labels.png');
   console.log('Touch settings, 20-hit boundary, persistence, cancellation, six-meteor waves and live speed change: passed');
+  if(process.argv.includes('--classic-smoke')){
+    await tap('#pause');await tap('#leave');assert.equal((await snapshot()).mode,'home');assert.deepEqual(errors,[]);
+    await fs.writeFile(new URL('classic-smoke-result.json',output),JSON.stringify({passed:true,checks:['classic entry through level selector','difficulty settings','wave quantity and speed','collect stars','word lesson','pause and return home'],errors},null,2));
+    console.log('Classic rescue entry and first missions: passed');ws.close();process.exit(0);
+  }
   let quotaChanged=false,lastIndex=-1,start=Date.now(),lastSlot=null,lastCount=-1,layoutChanges=0;
   while(Date.now()-start<210000){
     const s=await snapshot();
