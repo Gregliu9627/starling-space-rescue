@@ -9,7 +9,7 @@
   <meta name="description" content="驾驶飞船，听懂英文，救回机器人伙伴。为小小飞行员设计的触屏太空冒险。">
   <title>STARLING · 星际小队</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
   <svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -33,7 +33,8 @@
           <h1>小小飞行员，<br>宇宙在等你<span class="lime">。</span></h1>
           <p class="intro-description">驾驶你的飞船，听懂星际指令。<br>和机器人伙伴一起，把冒险变成新本领。</p>
           <button id="start" class="launch-button">开始救援 <svg><use href="#i-arrow"/></svg></button>
-          <p class="launch-note">一次小冒险 · 约 3–5 分钟 · 可随时暂停</p>
+          <button id="difficulty" class="difficulty-entry" aria-label="调整任务难度"><span>⚙ 任务难度 <b id="difficulty-name">探险</b></span><span>调整 ↗</span></button>
+          <p class="launch-note" id="difficulty-summary">速度 1.5× · 每波 3 颗 · 每项命中 6 次</p>
           <div class="mission-preview"><span class="mission-number">01</span><div><span class="overline">YOUR FIRST MISSION</span><h2>蓝星救援行动</h2><p>收集能量 / 听音瞄准 / 营救伙伴</p></div><span class="mission-dot">↗</span></div>
         </div>
         <div class="hero-art" aria-hidden="true">
@@ -74,5 +75,5 @@
     <div id="modal" class="modal-backdrop" hidden><section id="modal-content" class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title"></section></div>
     <div class="rotate-hint" id="rotate-hint"><span>▱ ↻</span><p>横过来，宇宙更宽广</p><small>建议将 iPad 横屏游玩</small><button id="dismiss-rotate" class="text-button">先这样玩</button></div>
   </main>
-  <script type="module" src="game.js"></script>
+  <script type="module" src="game.js?v=2"></script>
 </body></html>

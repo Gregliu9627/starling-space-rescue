@@ -1,4 +1,5 @@
-import { COLORS, WORDS, MISSIONS, evaluateAnswer, newProgress, loadProgress, recordTask } from './mission.js';
+import { COLORS, WORDS, MISSIONS, configuredMission, evaluateAnswer, newProgress, loadProgress, recordTask } from './mission.js?v=2';
+import { SETTINGS_KEY, PRESETS, SETTING_LIMITS, DEFAULT_SETTINGS, normalizeSettings, loadSettings, presetName, settingsSummary, hazardWave } from './settings.js?v=2';
 
 const $=id=>document.getElementById(id);
 const canvas=$('space'),ctx=canvas.getContext('2d');
@@ -6,13 +7,16 @@ const STORAGE_KEY='starling-progress-v1';
 let progress;
 try{progress=loadProgress(localStorage.getItem(STORAGE_KEY));}catch{progress=newProgress();}
 let storageAvailable=true;
-const state={mode:'home',index:0,count:0,score:0,hearts:3,elapsed:0,clock:0,phaseTime:0,shotTime:0,hazardTime:0,transition:0,wrongCooldown:0,shield:0,shieldCooldown:0,invincible:0,feedback:0,mistakes:0,replays:0,runMistakes:0,runReplays:0,rescued:0,sound:true,voiceFailed:false};
+let settings;
+try{settings=loadSettings(localStorage.getItem(SETTINGS_KEY));}catch{settings={...DEFAULT_SETTINGS};}
+let activeMission=configuredMission(0,settings);
+const state={mode:'home',index:0,count:0,score:0,hearts:3,elapsed:0,clock:0,phaseTime:0,shotTime:0,hazardTime:0,transition:0,wrongCooldown:0,aimGrace:0,shield:0,shieldCooldown:0,invincible:0,feedback:0,mistakes:0,replays:0,runMistakes:0,runReplays:0,rescued:0,sound:true,voiceFailed:false};
 let width=innerWidth,height=innerHeight,dpr=1,stars=[],targets=[],bullets=[],hazards=[],particles=[],pointer=null,keys=new Set(),audioContext,englishVoice,previousFocus;
 const ship={x:0,y:0,tx:0,ty:0};
 let lastFrame=0,ambient=0;
 const rnd=(a,b)=>a+Math.random()*(b-a);
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
-const mission=()=>MISSIONS[state.index];
+const mission=()=>activeMission;
 const fieldTop=()=>height<660?150:190;
 const playerMin=()=>Math.max(fieldTop()+125,height*.49);
 const save=()=>{try{localStorage.setItem(STORAGE_KEY,JSON.stringify(progress));}catch{storageAvailable=false;}};
@@ -60,14 +64,43 @@ function tone(freq=440,duration=.08,kind='sine',volume=.035){
 }
 
 function openModal(html){
-  previousFocus=document.activeElement;$('modal-content').innerHTML=html;$('modal').hidden=false;
+  previousFocus=document.activeElement;$('modal-content').classList.remove('difficulty-panel');$('modal-content').innerHTML=html;$('modal').hidden=false;
   queueMicrotask(()=>$('modal-content').querySelector('button')?.focus());
 }
 function closeModal(){$('modal').hidden=true;$('modal-content').innerHTML='';previousFocus?.focus?.();}
+function refreshDifficultySummary(){
+  $('difficulty-name').textContent=presetName(settings);
+  $('difficulty-summary').textContent=settingsSummary(settings);
+}
+function showDifficulty(origin='home'){
+  let draft={...settings};
+  const fields=[['meteorSpeed','陨石速度','下降速度，也影响 Boss 弹幕'],['meteorCount','陨石数量','每波同时出现的陨石 / 能量弹'],['targetHits','每项射击任务命中','颜色任务和每层 Boss 护盾的目标次数']];
+  openModal(`<div class="modal-topline"><span class="overline">FLIGHT SETTINGS / 飞行设置</span><button id="difficulty-close" class="close-modal" aria-label="取消难度调整">×</button></div><h2 id="modal-title">选好挑战，再出发</h2><div class="difficulty-presets">${Object.entries(PRESETS).map(([key,p])=>`<button type="button" data-preset="${key}" aria-pressed="false"><b>${p.label}</b><small>${p.description}</small></button>`).join('')}</div><div class="difficulty-controls">${fields.map(([key,label,help])=>{const {min,max,step}=SETTING_LIMITS[key];return `<div class="difficulty-control"><div class="setting-heading"><label for="setting-${key}">${label}</label><output id="value-${key}" for="setting-${key}"></output></div><div class="setting-input"><button type="button" data-adjust="${key}" data-direction="-1" aria-label="减少${label}">−</button><input id="setting-${key}" type="range" min="${min}" max="${max}" step="${step}" value="${draft[key]}"><button type="button" data-adjust="${key}" data-direction="1" aria-label="增加${label}">＋</button></div><small>${help}</small></div>`;}).join('')}</div><p class="settings-note">${origin==='pause'?'速度和数量在继续时生效；目标次数从下一项任务生效，当前进度保留。':'设置会记在这台设备上。收集星星和方位救援保持原来的数量。'}</p><button id="save-difficulty" class="launch-button">保存设置${origin==='pause'?'，返回暂停菜单':''} →</button><button id="cancel-difficulty" class="quiet-button">取消</button>`);
+  $('modal-content').classList.add('difficulty-panel');
+  const actions=document.createElement('div');actions.className='settings-actions';
+  $('save-difficulty').before(actions);actions.append($('save-difficulty'),$('cancel-difficulty'));
+  const refresh=()=>{
+    for(const [key] of fields){
+      $(`setting-${key}`).value=String(draft[key]);
+      $(`value-${key}`).textContent=key==='meteorSpeed'?`${draft[key]}×`:key==='meteorCount'?`${draft[key]} 颗 / 波`:`${draft[key]} 次`;
+      $(`setting-${key}`).setAttribute('aria-valuetext',$(`value-${key}`).textContent);
+      document.querySelectorAll(`[data-adjust="${key}"]`).forEach(b=>b.disabled=Number(b.dataset.direction)<0?draft[key]<=SETTING_LIMITS[key].min:draft[key]>=SETTING_LIMITS[key].max);
+    }
+    document.querySelectorAll('[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(Object.keys(DEFAULT_SETTINGS).every(k=>draft[k]===PRESETS[b.dataset.preset][k]))));
+  };
+  const back=()=>{if(origin==='pause')pauseGame();else if(origin==='briefing')showBriefing();else closeModal();};
+  for(const [key] of fields)$(`setting-${key}`).oninput=e=>{draft=normalizeSettings({...draft,[key]:Number(e.target.value)});refresh();};
+  document.querySelectorAll('[data-adjust]').forEach(b=>b.onclick=()=>{const key=b.dataset.adjust;draft=normalizeSettings({...draft,[key]:draft[key]+Number(b.dataset.direction)*SETTING_LIMITS[key].step});refresh();});
+  document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{draft=normalizeSettings(PRESETS[b.dataset.preset]);refresh();});
+  $('save-difficulty').onclick=()=>{settings={...draft};try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));}catch{storageAvailable=false;}refreshDifficultySummary();back();};
+  $('cancel-difficulty').onclick=back;$('difficulty-close').onclick=back;refresh();
+}
 function showBriefing(){
   unlockAudio();speak('Hello, pilot! Ready for takeoff?');
   openModal(`<span class="overline">PILOT TRAINING / 飞行准备</span><h2 id="modal-title">欢迎登舰，小小飞行员！</h2><p>✥　按住空白处拖动，飞船就会跟着走。<br>⌁　激光自动发射，瞄准目标就好。<br>◈　有危险时，点右下角的「能量护盾」。</p><p>听听机器人说什么，再完成任务。没听清，可以随时点「再听一次」。</p><button id="test-voice" class="secondary-button">♫ 听听英文语音</button><p id="voice-status" role="status" style="font-size:11px">点击试听，确认 iPad 音量和英文语音。</p><button id="begin" class="launch-button">准备好了，出发！ →</button><button id="brief-back" class="quiet-button">返回空间站</button>`);
   $('test-voice').onclick=()=>{unlockAudio();speak('Hello, pilot! Collect three stars!');};
+  $('begin').insertAdjacentHTML('beforebegin',`<button id="brief-difficulty" class="brief-difficulty">⚙ ${presetName(settings)}难度 · ${settings.targetHits} 次命中 / 项 <span>调整 ↗</span></button>`);
+  $('brief-difficulty').onclick=()=>showDifficulty('briefing');
   $('begin').onclick=startRun;$('brief-back').onclick=()=>{stopSpeech();closeModal();};
 }
 function startRun(){
@@ -79,7 +112,7 @@ function startRun(){
   setMission(0);updateHud();
 }
 function setMission(index){
-  state.index=index;state.count=0;state.phaseTime=0;state.shotTime=0;state.hazardTime=0;state.mistakes=0;state.replays=0;state.wrongCooldown=0;
+  state.index=index;activeMission=configuredMission(index,settings);state.count=0;state.phaseTime=0;state.shotTime=0;state.hazardTime=0;state.mistakes=0;state.replays=0;state.wrongCooldown=0;state.aimGrace=0;
   bullets=[];hazards=[];targets=[];
   const m=mission();
   $('instruction').textContent=m.text;
@@ -110,13 +143,13 @@ function updateHud(){
   $('score').textContent=String(state.score).padStart(3,'0');
   $('hearts').textContent='◆ '.repeat(state.hearts)+'◇ '.repeat(3-state.hearts);
   const m=mission();
-  $('objective').innerHTML=m.kind==='boss'?`守卫护盾 <b>${3-(state.index-5)} / 3</b>`:`${m.kind==='collect'?'能量星':m.kind==='color'?'命中目标':'机器人'} <b>${state.count} / ${m.goal}</b>`;
+  $('objective').innerHTML=m.kind==='boss'?`第 ${state.index-4} / 3 层护盾 <b>${state.count} / ${m.goal}</b>`:`${m.kind==='collect'?'能量星':m.kind==='color'?'命中目标':'机器人'} <b>${state.count} / ${m.goal}</b>`;
 }
 function showFeedback(text,wrong=false,duration=2){
   $('feedback').textContent=text;$('feedback').className='feedback visible'+(wrong?' wrong':'');state.feedback=duration;
 }
 function answer(target){
-  if(state.mode!=='playing'||state.transition>0||target.cooldown>0)return;
+  if(state.mode!=='playing'||state.transition>0||(state.aimGrace>0&&mission().kind!=='collect')||!target.active||target.cooldown>0)return;
   const m=mission();
   if(!evaluateAnswer(m,target.key)){
     if(state.wrongCooldown>0)return;
@@ -142,8 +175,8 @@ function answer(target){
     showFeedback(m.kind==='position'?'伙伴获救！Nice rescue!':m.kind==='boss'?'护盾解除！Great shot!':'任务完成！Well done!',false,1.8);
     speak(m.kind==='position'?'Thank you, pilot!':'Well done!');
   }else{
-    showFeedback(m.kind==='collect'?`${state.count===1?'One':'Two'} star${state.count>1?'s':''}!`:'Great shot! 再找一个',false,1.3);
-    if(m.kind==='color'){target.respawn=1.5;}
+    showFeedback(m.kind==='collect'?`${state.count===1?'One':'Two'} star${state.count>1?'s':''}!`:`Great shot! ${state.count} / ${m.goal}`,false,1.1);
+    if(m.kind==='color'||m.kind==='boss'){target.respawn=1;state.aimGrace=1.75;}
   }
   updateHud();
 }
@@ -159,10 +192,12 @@ function returnHome(){
   state.mode='home';stopSpeech();closeModal();$('home').hidden=false;$('play').hidden=true;pointer=null;keys.clear();hazards=[];bullets=[];particles=[];targets=[];$('start').focus();
 }
 function pauseGame(){
-  if(state.mode!=='playing')return;
+  if(!['playing','paused'].includes(state.mode))return;
   state.mode='paused';stopSpeech();pointer=null;keys.clear();
   openModal(`<span class="modal-symbol">☾</span><div class="overline">TAKE A LITTLE BREAK</div><h2 id="modal-title">飞船正在安全停泊</h2><p>喝口水，看看远处。准备好了再继续。</p><button id="resume" class="launch-button">继续救援 →</button><button id="leave" class="secondary-button">结束本次，返回空间站</button>`);
-  $('resume').onclick=()=>{closeModal();state.mode='playing';state.invincible=Math.max(2,state.invincible);speak(mission().text);};
+  $('resume').insertAdjacentHTML('beforebegin',`<button id="pause-difficulty" class="brief-difficulty">⚙ 调整任务难度 <span>${presetName(settings)} ↗</span></button><p class="pause-settings-summary">${settingsSummary(settings)}</p>`);
+  $('pause-difficulty').onclick=()=>showDifficulty('pause');
+  $('resume').onclick=()=>{closeModal();state.mode='playing';state.invincible=Math.max(2,state.invincible);state.aimGrace=Math.max(.75,state.aimGrace);speak(mission().text);};
   $('leave').onclick=returnHome;
 }
 function repairShip(){
@@ -179,6 +214,7 @@ function showParent(){
 }
 
 $('start').onclick=showBriefing;$('open-parent').onclick=showParent;$('pause').onclick=pauseGame;
+$('difficulty').onclick=()=>showDifficulty('home');refreshDifficultySummary();
 $('dismiss-rotate').onclick=()=>$('rotate-hint').classList.add('dismissed');
 $('repeat').onclick=()=>{
   if(state.mode!=='playing')return;
@@ -215,7 +251,7 @@ window.addEventListener('blur',()=>{if(state.mode==='playing')pauseGame();});
 function burst(x,y,color,count=15){for(let i=0;i<count&&particles.length<180;i++)particles.push({x,y,vx:rnd(-100,100),vy:rnd(-100,100),life:rnd(.3,.8),max:.8,color,r:rnd(1.5,4)});}
 function update(dt){
   state.elapsed+=dt;state.clock+=dt;state.phaseTime+=dt;
-  for(const k of ['shield','shieldCooldown','invincible','wrongCooldown'])state[k]=Math.max(0,state[k]-dt);
+  for(const k of ['shield','shieldCooldown','invincible','wrongCooldown','aimGrace'])state[k]=Math.max(0,state[k]-dt);
   if(state.feedback>0){state.feedback-=dt;if(state.feedback<=0)$('feedback').className='feedback';}
   $('shield').disabled=state.shieldCooldown>0;$('shield-status').textContent=state.shield>0?'护盾保护中':state.shieldCooldown>0?`${Math.ceil(state.shieldCooldown)} 秒后准备就绪`:'点击开启 · 3 秒保护';
   if(state.elapsed>10)$('flight-guide').style.opacity='0';
@@ -228,12 +264,12 @@ function update(dt){
   const m=mission();
   for(const t of targets){
     t.cooldown=Math.max(0,t.cooldown-dt);
-    if(t.respawn){t.respawn-=dt;if(t.respawn<=0){t.active=true;t.respawn=0;const positions=shuffle(targets.map(v=>v.slot));targets.forEach((v,i)=>v.slot=positions[i]);layoutTargets();}}
+    if(t.respawn){t.respawn-=dt;if(t.respawn<=0){t.active=true;t.respawn=0;const shift=1+Math.floor(Math.random()*(targets.length-1));targets.forEach(v=>v.slot=(v.slot+shift)%targets.length);bullets=[];layoutTargets();}}
     t.x=t.baseX+(m.kind==='color'||m.kind==='boss'?Math.sin(state.phaseTime*.5+t.slot)*Math.min(25,width*.025):0);
     if(t.active&&m.kind==='collect'&&Math.hypot(ship.x-t.x,ship.y-t.y)<t.r+23)answer(t);
   }
   state.shotTime+=dt;
-  if(state.shotTime>.24&&state.phaseTime>1.7&&state.wrongCooldown<=0){state.shotTime=0;bullets.push({x:ship.x,y:ship.y-36});if(state.elapsed%2<.25)tone(560,.04,'triangle',.009);}
+  if(state.shotTime>.24&&state.phaseTime>1.7&&state.wrongCooldown<=0&&state.aimGrace<=0){state.shotTime=0;bullets.push({x:ship.x,y:ship.y-36});if(state.elapsed%2<.25)tone(560,.04,'triangle',.009);}
   for(const b of bullets){
     b.y-=600*dt;
     if(m.kind!=='collect')for(const t of targets){if(t.active&&Math.abs(b.x-t.x)<t.r&&Math.abs(b.y-t.y)<t.r){answer(t);b.y=-100;break;}}
@@ -241,10 +277,14 @@ function update(dt){
   }
   bullets=bullets.filter(b=>b.y>-20);
   state.hazardTime+=dt;
-  const interval=m.kind==='boss'?1.9:3.1;
-  if(state.hazardTime>interval&&state.phaseTime>3.5){state.hazardTime=0;hazards.push({x:rnd(60,width-60),y:fieldTop()-10,r:m.kind==='boss'?8:rnd(14,22),vy:m.kind==='boss'?105:65,rotation:rnd(0,6.28),kind:m.kind==='boss'?'energy':'rock'});}
+  const wave=hazardWave(settings,m.kind==='boss');
+  if(state.hazardTime>wave.interval&&state.phaseTime>3.5){
+    state.hazardTime=0;
+    const count=Math.min(wave.count,36-hazards.length),lane=(width-120)/wave.count;
+    for(let i=0;i<count;i++)hazards.push({x:60+lane*(i+rnd(.15,.85)),y:fieldTop()-10-rnd(0,30),r:m.kind==='boss'?8:rnd(14,22),vy:wave.baseSpeed,rotation:rnd(0,6.28),kind:m.kind==='boss'?'energy':'rock'});
+  }
   for(const h of hazards){
-    h.y+=h.vy*dt*(state.wrongCooldown>0?.35:1);h.rotation+=dt*.3;
+    h.y+=h.vy*settings.meteorSpeed*dt*(state.wrongCooldown>0?.35:1);h.rotation+=dt*.3;
     if(!h.dead&&Math.hypot(h.x-ship.x,h.y-ship.y)<h.r+20){
       h.dead=true;burst(h.x,h.y,'#74d7d1');
       if(state.shield<=0&&state.invincible<=0){state.hearts--;state.invincible=2;tone(95,.2,'triangle',.08);updateHud();showFeedback('留意陨石，护盾可以保护你',true);if(state.hearts<=0){repairShip();return;}}
@@ -333,4 +373,4 @@ function frame(now){
 requestAnimationFrame(frame);
 
 // Read-only snapshot for browser interaction tests; contains no player identity.
-export function inspectGame(){return JSON.parse(JSON.stringify({mode:state.mode,index:state.index,count:state.count,score:state.score,hearts:state.hearts,elapsed:state.elapsed,transition:state.transition,shield:state.shield,shieldCooldown:state.shieldCooldown,mistakes:state.runMistakes,replays:state.runReplays,ship,targets,progress}));}
+export function inspectGame(){return JSON.parse(JSON.stringify({mode:state.mode,index:state.index,count:state.count,goal:mission().goal,score:state.score,hearts:state.hearts,elapsed:state.elapsed,transition:state.transition,shield:state.shield,shieldCooldown:state.shieldCooldown,mistakes:state.runMistakes,replays:state.runReplays,settings,ship,targets,hazards:hazards.map(h=>({...h,effectiveSpeed:h.vy*settings.meteorSpeed})),progress}));}

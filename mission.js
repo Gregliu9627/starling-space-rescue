@@ -1,3 +1,4 @@
+import { normalizeSettings } from './settings.js?v=2';
 export const COLORS = {red:'#ff7d7b',blue:'#75c9fa',green:'#b5eb8c'};
 export const WORDS = {
   stars:{en:'three stars',zh:'三颗星星'},red:{en:'red',zh:'红色'},blue:{en:'blue',zh:'蓝色'},green:{en:'green',zh:'绿色'},
@@ -13,6 +14,12 @@ export const MISSIONS = [
   {kind:'boss',section:3,key:'red',text:'Hit the red energy ball!',hint:'听清颜色，再瞄准能量球',goal:1},
   {kind:'boss',section:3,key:'blue',text:'Hit the blue energy ball!',hint:'最后一层护盾，加油！',goal:1}
 ];
+export function configuredMission(index,settings){
+  const base=MISSIONS[index];
+  if(!base)throw new RangeError('Unknown mission');
+  const goal=['color','boss'].includes(base.kind)?normalizeSettings(settings).targetHits:base.goal;
+  return {...base,goal};
+}
 export function evaluateAnswer(mission, answer) {
   if(mission.kind==='collect') return answer==='star';
   return answer===mission.key;
