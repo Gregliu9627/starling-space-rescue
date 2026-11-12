@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
+if(process.argv.includes('--expanded')){await import('./vocabulary-browser-qa.mjs');process.exit(0);}
+
 const output=new URL('../qa/',import.meta.url);await fs.mkdir(output,{recursive:true});
 const tabs=await fetch('http://127.0.0.1:9225/json/list').then(r=>r.json());
 const ws=new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);
@@ -57,7 +59,7 @@ try{
   await tap('#save-difficulty');assert.deepEqual((await snapshot()).settings,{meteorSpeed:2,meteorCount:6,targetHits:20});
   await cdp('Page.reload');await sleep(500);assert.equal((await snapshot()).settings.targetHits,20);assert.equal((await snapshot()).progress.runs,2);
   await tap('#difficulty');await tap('[data-preset=training]');await tap('#cancel-difficulty');assert.equal((await snapshot()).settings.targetHits,20);
-  await tap('#open-words');await assertFits('#library-quiz');await shot('reading-library-ipad.png');
+  await tap('#open-words');await evaluate("document.querySelector('#word-theme').value='space';document.querySelector('#word-theme').dispatchEvent(new Event('change'))");await assertFits('#library-quiz');await shot('reading-library-ipad.png');
   await tap('[data-card=behind]');await assertFits('#word-continue');await shot('reading-behind-card.png');
   assert.equal(await evaluate("document.querySelector('#modal-title').textContent"),'behind');
   await tap('#word-speak');await tap('#word-continue');await tap('#library-close');
