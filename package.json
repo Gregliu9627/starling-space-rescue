@@ -1,11 +1,11 @@
 {
   "name": "starling-space-rescue",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check game.js && node --check mission.js && node --check settings.js",
-    "test": "node --test tests/mission.test.js",
+    "check": "node --check game.js && node --check mission.js && node --check settings.js && node --check vocabulary.js",
+    "test": "node --test tests/*.test.js",
     "dev": "python3 -m http.server 4173 --bind 0.0.0.0"
   }
 }

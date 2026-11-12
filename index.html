@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="description" content="驾驶飞船，听懂英文，救回机器人伙伴。为小小飞行员设计的触屏太空冒险。">
+  <meta name="description" content="驾驶飞船，听懂英文，认识单词，救回机器人伙伴。为小小飞行员设计的触屏太空冒险。">
   <title>STARLING · 星际小队</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <svg class="svg-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -25,13 +25,13 @@
     <section id="home" class="screen home-screen" aria-label="游戏首页">
       <header class="site-header">
         <a class="brand" href="./" aria-label="STARLING 星际小队首页"><span class="brand-icon">✦</span><span>STARLING<small>星 际 小 队</small></span></a>
-        <div class="header-actions"><span class="station-status"><i></i> 空间站已连接</span><button class="text-button" id="open-parent">家长舱 <span>↗</span></button></div>
+        <div class="header-actions"><span class="station-status"><i></i> 空间站已连接</span><button class="text-button" id="open-words">单词舱 <span>↗</span></button><button class="text-button" id="open-parent">家长舱 <span>↗</span></button></div>
       </header>
       <div class="home-body">
         <div class="intro-copy">
           <p class="eyebrow"><span class="tiny-line"></span> ENGLISH SPACE ADVENTURE</p>
           <h1>小小飞行员，<br>宇宙在等你<span class="lime">。</span></h1>
-          <p class="intro-description">驾驶你的飞船，听懂星际指令。<br>和机器人伙伴一起，把冒险变成新本领。</p>
+          <p class="intro-description">驾驶你的飞船，听懂指令，认识单词。<br>和机器人伙伴一起，把冒险变成新本领。</p>
           <button id="start" class="launch-button">开始救援 <svg><use href="#i-arrow"/></svg></button>
           <button id="difficulty" class="difficulty-entry" aria-label="调整任务难度"><span>⚙ 任务难度 <b id="difficulty-name">探险</b></span><span>调整 ↗</span></button>
           <p class="launch-note" id="difficulty-summary">速度 1.5× · 每波 3 颗 · 每项命中 6 次</p>
@@ -67,6 +67,7 @@
     <section id="play" class="screen play-screen" aria-label="救援任务" hidden>
       <header class="play-header"><div class="play-brand"><span class="brand-icon">✦</span> STARLING</div><div class="stage-progress" id="stage-progress"></div><div class="play-tools"><button id="sound" class="icon-button" aria-label="关闭音效" aria-pressed="false"><svg><use href="#i-sound"/></svg></button><button id="pause" class="icon-button" aria-label="暂停游戏"><svg><use href="#i-pause"/></svg></button></div></header>
       <div class="task-card"><div class="task-avatar"><span class="mini-robot"><i></i><i></i></span></div><div class="task-text"><span class="overline" id="task-tag">MISSION 01 / 收集能量</span><h2 id="instruction">Collect three stars!</h2><p id="task-hint">飞过去收集三颗能量星</p></div><button id="repeat" class="repeat-button" aria-label="再听一次英文指令"><svg><use href="#i-sound"/></svg><span>再听一次</span></button></div>
+      <button id="focus-word" class="focus-word" aria-label="查看当前单词卡"></button>
       <div class="hud-left"><div class="hud-label">飞船护甲</div><div id="hearts" class="hearts">◆ ◆ ◆</div></div><div class="hud-right"><span class="hud-label">任务能量</span><strong id="score">000</strong></div>
       <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
       <div class="flight-guide" id="flight-guide"><span>✥</span> 按住空白处拖动飞船</div>
@@ -75,5 +76,5 @@
     <div id="modal" class="modal-backdrop" hidden><section id="modal-content" class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title"></section></div>
     <div class="rotate-hint" id="rotate-hint"><span>▱ ↻</span><p>横过来，宇宙更宽广</p><small>建议将 iPad 横屏游玩</small><button id="dismiss-rotate" class="text-button">先这样玩</button></div>
   </main>
-  <script type="module" src="game.js?v=2"></script>
+  <script type="module" src="game.js?v=3"></script>
 </body></html>

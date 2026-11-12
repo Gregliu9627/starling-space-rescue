@@ -1,5 +1,6 @@
-import { COLORS, WORDS, MISSIONS, configuredMission, evaluateAnswer, newProgress, loadProgress, recordTask } from './mission.js?v=2';
-import { SETTINGS_KEY, PRESETS, SETTING_LIMITS, DEFAULT_SETTINGS, normalizeSettings, loadSettings, presetName, settingsSummary, hazardWave } from './settings.js?v=2';
+import { COLORS, WORDS, MISSIONS, configuredMission, evaluateAnswer, newProgress, loadProgress, recordTask } from './mission.js?v=3';
+import { SETTINGS_KEY, PRESETS, SETTING_LIMITS, DEFAULT_SETTINGS, normalizeSettings, loadSettings, presetName, settingsSummary, hazardWave } from './settings.js?v=3';
+import { READING_KEY, VOCABULARY, highlightInstruction, picture, readingChoices, newReading, loadReading, recordReading } from './vocabulary.js?v=3';
 
 const $=id=>document.getElementById(id);
 const canvas=$('space'),ctx=canvas.getContext('2d');
@@ -7,6 +8,9 @@ const STORAGE_KEY='starling-progress-v1';
 let progress;
 try{progress=loadProgress(localStorage.getItem(STORAGE_KEY));}catch{progress=newProgress();}
 let storageAvailable=true;
+let reading;try{reading=loadReading(localStorage.getItem(READING_KEY));}catch{reading=newReading();}
+const seenWords=new Set();let quiz=null;
+const saveReading=()=>{try{localStorage.setItem(READING_KEY,JSON.stringify(reading));}catch{storageAvailable=false;}};
 let settings;
 try{settings=loadSettings(localStorage.getItem(SETTINGS_KEY));}catch{settings={...DEFAULT_SETTINGS};}
 let activeMission=configuredMission(0,settings);
@@ -17,8 +21,8 @@ let lastFrame=0,ambient=0;
 const rnd=(a,b)=>a+Math.random()*(b-a);
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const mission=()=>activeMission;
-const fieldTop=()=>height<660?150:190;
-const playerMin=()=>Math.max(fieldTop()+125,height*.49);
+const fieldTop=()=>height<660?185:225;
+const playerMin=()=>Math.max(fieldTop()+180,height*.49);
 const save=()=>{try{localStorage.setItem(STORAGE_KEY,JSON.stringify(progress));}catch{storageAvailable=false;}};
 
 function resize(){
@@ -52,7 +56,7 @@ function speak(text){
     speechSynthesis.speak(utterance);
   }catch{voiceUnavailable();}
 }
-function voiceUnavailable(){state.voiceFailed=true;if($('voice-status'))$('voice-status').textContent='当前浏览器暂时无法播放语音。可以看英文字幕继续，或稍后在 Safari 重试。';showFeedback('语音暂不可用，可以看英文字幕继续',true,5);}
+function voiceUnavailable(){state.voiceFailed=true;if($('voice-status'))$('voice-status').textContent='当前浏览器暂时无法播放语音。可以看英文字幕继续，或稍后在 Safari 重试。';if($('word-audio-status'))$('word-audio-status').textContent='语音暂不可用，先看单词和图示也可以。';showFeedback('语音暂不可用，可以看英文字幕继续',true,5);}
 function stopSpeech(){if('speechSynthesis' in window)speechSynthesis.cancel();}
 function tone(freq=440,duration=.08,kind='sine',volume=.035){
   if(!state.sound||!audioContext||audioContext.state!=='running')return;
@@ -64,10 +68,68 @@ function tone(freq=440,duration=.08,kind='sine',volume=.035){
 }
 
 function openModal(html){
-  previousFocus=document.activeElement;$('modal-content').classList.remove('difficulty-panel');$('modal-content').innerHTML=html;$('modal').hidden=false;
+  previousFocus=document.activeElement;$('modal-content').className='modal-panel';$('modal-content').innerHTML=html;$('modal').hidden=false;
   queueMicrotask(()=>$('modal-content').querySelector('button')?.focus());
 }
 function closeModal(){$('modal').hidden=true;$('modal-content').innerHTML='';previousFocus?.focus?.();}
+function readWord(text){if(!state.sound){state.sound=true;updateSoundButton();}unlockAudio();speak(text);}
+function showWordCard(key,back,newWord=false){
+  const w=VOCABULARY[key];if(!w)return;
+  stopSpeech();
+  const pieces=w.word.includes(' ')?w.word.split(' '):[...w.word];
+  openModal(`<div class="modal-topline"><span class="overline">${newWord?'WORD DISCOVERY / 认识任务里的词':'WORD CARD / 看一看，读一读'}</span><button id="word-close" class="close-modal" aria-label="关闭单词卡">×</button></div><div class="word-lesson"><div class="lesson-illustration">${picture(key)}</div><div class="lesson-copy"><h2 id="modal-title" class="lesson-word" data-word-key="${key}">${w.word}</h2><p class="lesson-meaning">${w.zh}</p><div class="letter-tiles" aria-label="${w.word.includes(' ')?'短语中的单词':'单词的字母'}">${pieces.map(p=>`<span>${p}</span>`).join('')}</div></div></div><div class="word-example"><b>${highlightInstruction(w.example,key)}</b><span>${w.exampleZh}</span><p>${w.note}</p></div><div class="word-audio-actions"><button id="word-speak" class="secondary-button">♫ 听单词</button><button id="word-example-speak" class="secondary-button">♫ 听短语</button>${!w.word.includes(' ')?'<button id="word-spell" class="secondary-button">ABC 听字母</button>':''}</div><p id="word-audio-status" class="word-audio-status" role="status">点按钮可以反复听，也可以跟着读一遍。</p><button id="word-continue" class="launch-button">${newWord?'带上这个词，出发！ →':state.mode==='learning'?'继续救援 →':'返回 →'}</button>`);
+  $('modal-content').classList.add('word-panel');
+  const leave=()=>{stopSpeech();back();};
+  $('word-close').onclick=leave;$('word-continue').onclick=leave;
+  $('word-speak').onclick=()=>readWord(w.word);$('word-example-speak').onclick=()=>readWord(w.example);
+  if($('word-spell'))$('word-spell').onclick=()=>readWord(`${[...w.word].join('. ')}. ${w.word}.`);
+  speak(`${w.word}. ${w.example}.`);
+}
+function openMissionWord(newWord=false){
+  if(!['playing','paused'].includes(state.mode))return;
+  const previousMode=state.mode;state.mode='learning';pointer=null;keys.clear();stopSpeech();
+  showWordCard(mission().key,()=>{
+    closeModal();state.mode=previousMode;
+    if(previousMode==='paused'){pauseGame();return;}
+    state.invincible=Math.max(2,state.invincible);state.aimGrace=Math.max(.75,state.aimGrace);speak(mission().text);
+  },newWord);
+}
+function showLibrary(back=closeModal){
+  stopSpeech();
+  openModal(`<div class="modal-topline"><span class="overline">WORD COLLECTION / 单词舱</span><button id="library-close" class="close-modal" aria-label="关闭单词舱">×</button></div><h2 id="modal-title">把听过的词，变成认得的词</h2><p class="library-intro">点一张卡：看图、看拼写、听发音。</p><div class="vocabulary-grid">${Object.entries(VOCABULARY).map(([key,w])=>{const r=reading.records[key];return `<button class="vocabulary-card" data-card="${key}">${picture(key)}<b>${w.word}</b><span>${w.zh}</span><small>${r?`认词首次选对 ${r.firstTry} / ${r.completed} 次`:'点开听读 ↗'}</small></button>`;}).join('')}</div><button id="library-quiz" class="launch-button">认词小挑战 →</button><p class="library-note">看图选英文，不计时。选错可以再试。</p>`);
+  $('modal-content').classList.add('library-panel');
+  $('library-close').onclick=()=>{stopSpeech();back();};
+  document.querySelectorAll('[data-card]').forEach(b=>b.onclick=()=>showWordCard(b.dataset.card,()=>showLibrary(back)));
+  $('library-quiz').onclick=()=>startReadingQuiz(()=>showLibrary(back));
+}
+function startReadingQuiz(back=()=>showLibrary()){
+  stopSpeech();quiz={order:shuffle(Object.keys(VOCABULARY)),index:0,firstTry:0,mistakes:0,answered:false,finished:false,back};showReadingQuestion();
+}
+function showReadingQuestion(){
+  if(!quiz)return;
+  if(quiz.index>=quiz.order.length){finishReadingQuiz();return;}
+  quiz.key=quiz.order[quiz.index];quiz.options=readingChoices(quiz.key);quiz.mistakes=0;quiz.answered=false;
+  const w=VOCABULARY[quiz.key];
+  openModal(`<div class="modal-topline"><span class="overline">READ & MATCH / ${quiz.index+1} OF ${quiz.order.length}</span><button id="quiz-exit" class="close-modal" aria-label="结束认词挑战">×</button></div><h2 id="modal-title">哪个单词和图片相配？</h2><div class="quiz-picture">${picture(quiz.key)}<p>${w.zh}</p></div><div class="reading-options">${quiz.options.map(key=>`<button data-choice="${key}">${VOCABULARY[key].word}</button>`).join('')}</div><p id="quiz-feedback" class="quiz-feedback" role="status" aria-live="polite">仔细看看单词，慢慢选。</p><button id="quiz-next" class="launch-button" disabled>${quiz.index+1===quiz.order.length?'看看这次的收获 →':'下一个词 →'}</button>`);
+  $('modal-content').classList.add('reading-panel');
+  $('quiz-exit').onclick=()=>{stopSpeech();quiz.back();};
+  document.querySelectorAll('[data-choice]').forEach(b=>b.onclick=()=>{
+    if(quiz.answered)return;
+    const chosen=b.dataset.choice;
+    if(chosen!==quiz.key){quiz.mistakes++;b.disabled=true;b.classList.add('try-again');$('quiz-feedback').textContent=`${VOCABULARY[chosen].word} = ${VOCABULARY[chosen].zh}。再找找「${w.zh}」。`;readWord(VOCABULARY[chosen].word);return;}
+    quiz.answered=true;if(quiz.mistakes===0)quiz.firstTry++;
+    recordReading(reading,quiz.key,quiz.mistakes);saveReading();
+    b.classList.add('matched');document.querySelectorAll('[data-choice]').forEach(option=>option.disabled=true);
+    $('quiz-feedback').textContent=`${w.word} · ${w.zh}，配对成功！`;$('quiz-next').disabled=false;readWord(w.word);
+  });
+  $('quiz-next').onclick=()=>{if(!quiz.answered)return;stopSpeech();quiz.index++;showReadingQuestion();};
+}
+function finishReadingQuiz(){
+  if(!quiz.finished){quiz.finished=true;reading.sessions++;saveReading();}
+  openModal(`<span class="overline">READING COMPLETE / 认词练习完成</span><h2 id="modal-title">又和这些单词见面啦！</h2><div class="reading-score"><strong>${quiz.firstTry} <small>/ ${quiz.order.length}</small></strong><span>这次首次选对</span></div><p>点下面的单词，再看一看、听一听。<br>下次探险见到它们，还能认出来吗？</p><div class="word-grid">${quiz.order.map(key=>`<button class="word-chip" data-review-card="${key}">${VOCABULARY[key].word}<small>${VOCABULARY[key].zh}</small></button>`).join('')}</div><button id="reading-done" class="launch-button">返回 →</button><button id="reading-again" class="secondary-button">再练一次</button>`);
+  $('reading-done').onclick=()=>{stopSpeech();quiz.back();};$('reading-again').onclick=()=>startReadingQuiz(quiz.back);
+  document.querySelectorAll('[data-review-card]').forEach(b=>b.onclick=()=>showWordCard(b.dataset.reviewCard,finishReadingQuiz));
+}
 function refreshDifficultySummary(){
   $('difficulty-name').textContent=presetName(settings);
   $('difficulty-summary').textContent=settingsSummary(settings);
@@ -107,6 +169,7 @@ function startRun(){
   closeModal();unlockAudio();
   Object.assign(state,{mode:'playing',index:0,count:0,score:0,hearts:3,elapsed:0,clock:0,phaseTime:0,shotTime:0,hazardTime:0,transition:0,wrongCooldown:0,shield:3,shieldCooldown:0,invincible:3,feedback:0,mistakes:0,replays:0,runMistakes:0,runReplays:0,rescued:0});
   targets=[];hazards=[];bullets=[];particles=[];keys.clear();pointer=null;
+  seenWords.clear();
   ship.x=width*.5;ship.y=height-140;ship.tx=ship.x;ship.ty=ship.y;
   $('home').hidden=true;$('play').hidden=false;$('flight-guide').style.opacity='1';
   setMission(0);updateHud();
@@ -115,14 +178,16 @@ function setMission(index){
   state.index=index;activeMission=configuredMission(index,settings);state.count=0;state.phaseTime=0;state.shotTime=0;state.hazardTime=0;state.mistakes=0;state.replays=0;state.wrongCooldown=0;state.aimGrace=0;
   bullets=[];hazards=[];targets=[];
   const m=mission();
-  $('instruction').textContent=m.text;
+  $('instruction').innerHTML=highlightInstruction(m.text,m.key);
+  const word=VOCABULARY[m.key];$('focus-word').innerHTML=`<b>${word.word}</b><span>${word.zh}</span><small>♫ 单词卡</small>`;
   $('task-hint').textContent=m.hint;
   $('task-tag').textContent=['MISSION 01 / 收集能量','MISSION 02 / 听音瞄准','MISSION 03 / 营救伙伴','MISSION 04 / 守卫挑战'][m.section];
   $('stage-progress').innerHTML=['能量','瞄准','救援','守卫'].map((label,i)=>`<div class="stage-marker ${i===m.section?'active':i<m.section?'done':''}"><b>${i<m.section?'✓':i+1}</b><span>${label}</span></div>`).join('');
   if(m.kind==='collect')targets=Array.from({length:3},(_,i)=>({key:'star',slot:i,active:true}));
   else if(m.kind==='position')targets=shuffle(['behind','front']).map((key,slot)=>({key,slot,active:true}));
   else targets=shuffle(Object.keys(COLORS)).map((key,slot)=>({key,slot,active:true}));
-  layoutTargets();updateHud();speak(m.text);
+  layoutTargets();updateHud();
+  if(!seenWords.has(m.key)){seenWords.add(m.key);openMissionWord(true);}else speak(m.text);
   if(m.kind==='position'&&m.key==='behind')showFeedback('救援激光：瞄准机器人下方的光环',false,3.5);
 }
 function shuffle(items){const copy=[...items];for(let i=copy.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[copy[i],copy[j]]=[copy[j],copy[i]];}return copy;}
@@ -184,8 +249,16 @@ function answer(target){
 function finishRun(){
   state.mode='results';stopSpeech();progress.runs++;save();pointer=null;keys.clear();
   speak('Mission complete! You are a space hero!');
+  showResults();
+}
+function showResults(){
   const totalSeconds=Math.floor(state.elapsed),duration=`${Math.floor(totalSeconds/60)}:${String(totalSeconds%60).padStart(2,'0')}`;
   openModal(`<span class="modal-symbol">✦</span><div class="overline">MISSION COMPLETE</div><h2 id="modal-title">欢迎回家，星际英雄！</h2><p>两位机器人伙伴安全回到空间站。<br>今天，你练习了这些星际指令里的词。</p><div class="stats-row"><div class="stat-tile"><strong>${state.score}</strong><span>任务能量</span></div><div class="stat-tile"><strong>${state.rescued}</strong><span>获救伙伴</span></div><div class="stat-tile"><strong>${duration}</strong><span>飞行时间</span></div></div><div class="word-grid">${Object.values(WORDS).map(w=>`<span class="word-chip">${w.en}<small>${w.zh}</small></span>`).join('')}</div><p>休息一下，也可以和爸爸妈妈说说：<br>“behind” 和 “in front of” 有什么不同？</p><button id="result-home" class="launch-button">返回空间站 →</button><button id="result-replay" class="secondary-button">再出发一次</button>`);
+  const grid=$('modal-content').querySelector('.word-grid');
+  grid.innerHTML=Object.entries(VOCABULARY).map(([key,w])=>`<button class="word-chip" data-result-word="${key}">${w.word}<small>${w.zh}</small></button>`).join('');
+  grid.querySelectorAll('[data-result-word]').forEach(b=>b.onclick=()=>showWordCard(b.dataset.resultWord,showResults));
+  $('result-home').insertAdjacentHTML('beforebegin','<button id="result-reading" class="secondary-button">认词小挑战 →</button>');
+  $('result-reading').onclick=()=>startReadingQuiz(showResults);
   $('result-home').onclick=returnHome;$('result-replay').onclick=startRun;
 }
 function returnHome(){
@@ -197,6 +270,8 @@ function pauseGame(){
   openModal(`<span class="modal-symbol">☾</span><div class="overline">TAKE A LITTLE BREAK</div><h2 id="modal-title">飞船正在安全停泊</h2><p>喝口水，看看远处。准备好了再继续。</p><button id="resume" class="launch-button">继续救援 →</button><button id="leave" class="secondary-button">结束本次，返回空间站</button>`);
   $('resume').insertAdjacentHTML('beforebegin',`<button id="pause-difficulty" class="brief-difficulty">⚙ 调整任务难度 <span>${presetName(settings)} ↗</span></button><p class="pause-settings-summary">${settingsSummary(settings)}</p>`);
   $('pause-difficulty').onclick=()=>showDifficulty('pause');
+  $('resume').insertAdjacentHTML('beforebegin','<button id="pause-word" class="secondary-button">♫ 再看看这个单词</button>');
+  $('pause-word').onclick=()=>openMissionWord();
   $('resume').onclick=()=>{closeModal();state.mode='playing';state.invincible=Math.max(2,state.invincible);state.aimGrace=Math.max(.75,state.aimGrace);speak(mission().text);};
   $('leave').onclick=returnHome;
 }
@@ -209,11 +284,14 @@ function repairShip(){
 function showParent(){
   const total=Object.values(progress.records).reduce((n,r)=>n+r.completed,0);
   openModal(`<div class="modal-topline"><span class="overline">PARENT DECK / 家长舱</span><button id="parent-close" class="close-modal" aria-label="关闭家长舱">×</button></div><h2 id="modal-title">每次冒险，都留下一点进步</h2><p>本设备完成了 <b>${progress.runs}</b> 次救援、<b>${total}</b> 项任务。记录用于观察练习情况，不代表已经掌握单词。</p>${Object.entries(WORDS).map(([key,w])=>{const r=progress.records[key];return `<div class="parent-record"><div><b>${w.en}</b><small>${w.zh}</small></div><div class="record-result">${r?`${r.firstTry} / ${r.completed} 次无误完成`:'等待第一次探索'}<br><small>${r?`选错 ${r.mistakes} 次 · 主动重听 ${r.replays} 次`:key==='stars'?'跟随数量指令收集':'听音与认读练习'}</small></div></div>`;}).join('')}<p style="font-size:11px">记录只保存在当前浏览器，不会跨设备同步。清除浏览器数据也会清除记录。建议陪孩子玩第一关，确认英文语音能正常播放。</p>${!storageAvailable?'<p class="sound-notice">浏览器不允许保存记录；当前记录只在这次打开期间保留。</p>':''}<button id="parent-done" class="launch-button">回到空间站 →</button><button id="clear-progress" class="quiet-button">清除本机学习记录</button>`);
+  const summary=Object.values(reading.records).reduce((a,r)=>({completed:a.completed+r.completed,firstTry:a.firstTry+r.firstTry}),{completed:0,firstTry:0});
+  $('parent-done').insertAdjacentHTML('beforebegin',`<div class="reading-parent-summary"><b>看图认词 · 首次选对 ${summary.firstTry} / ${summary.completed} 次</b><p>完成 ${reading.sessions} 轮认词挑战。战斗里有图文提示；这里单独记录看图选英文的表现。</p>${Object.entries(VOCABULARY).map(([key,w])=>{const r=reading.records[key];return `<span>${w.word}：${r?`${r.firstTry} / ${r.completed}`:'尚未练习'}</span>`;}).join('')}</div>`);
   $('parent-close').onclick=closeModal;$('parent-done').onclick=closeModal;
-  $('clear-progress').onclick=()=>{openModal(`<div class="overline">LOCAL RECORDS</div><h2 id="modal-title">清除这台设备的记录？</h2><p>已完成次数和词汇练习记录会归零。</p><button id="keep-records" class="launch-button">保留记录</button><button id="confirm-clear" class="secondary-button">确认清除</button>`);$('keep-records').onclick=showParent;$('confirm-clear').onclick=()=>{progress=newProgress();save();showParent();};};
+  $('clear-progress').onclick=()=>{openModal(`<div class="overline">LOCAL RECORDS</div><h2 id="modal-title">清除这台设备的记录？</h2><p>救援任务和看图认词的练习记录都会归零。</p><button id="keep-records" class="launch-button">保留记录</button><button id="confirm-clear" class="secondary-button">确认清除</button>`);$('keep-records').onclick=showParent;$('confirm-clear').onclick=()=>{progress=newProgress();reading=newReading();save();saveReading();showParent();};};
 }
 
 $('start').onclick=showBriefing;$('open-parent').onclick=showParent;$('pause').onclick=pauseGame;
+$('open-words').onclick=()=>showLibrary();$('focus-word').onclick=()=>openMissionWord();
 $('difficulty').onclick=()=>showDifficulty('home');refreshDifficultySummary();
 $('dismiss-rotate').onclick=()=>$('rotate-hint').classList.add('dismissed');
 $('repeat').onclick=()=>{
@@ -323,7 +401,7 @@ function drawDrone(t){
   circle(0,0,44,color+'0b');ctx.strokeStyle=color+'36';ctx.setLineDash([4,6]);circle(0,0,42,null,color+'45');ctx.setLineDash([]);
   path([[-14,-9],[-35,-19],[-29,17],[-14,13]],'#263c53',color);path([[14,-9],[35,-19],[29,17],[14,13]],'#263c53',color);
   roundedRect(-19,-16,38,34,10,'#183249',color);roundedRect(-13,-7,26,10,5,color);circle(-5,-2,2,'#13263a');circle(5,-2,2,'#13263a');
-  ctx.fillStyle=color;ctx.font='9px ui-monospace, monospace';ctx.textAlign='center';ctx.fillText('DRONE '+String(t.slot+1).padStart(2,'0'),0,59);ctx.restore();
+  ctx.fillStyle=color;ctx.font='700 22px -apple-system, sans-serif';ctx.textAlign='center';ctx.fillText(t.key,0,64);ctx.restore();
 }
 function drawRock(x,y,r,rot=0){
   ctx.save();ctx.translate(x,y);ctx.rotate(rot);const points=[];for(let i=0;i<9;i++){const angle=i*Math.PI*2/9,rad=r*(.86+(i%3)*.07);points.push([Math.cos(angle)*rad,Math.sin(angle)*rad]);}path(points,'#43576b','#718598');circle(-r*.23,-r*.17,r*.2,'#31455a');circle(r*.28,r*.22,r*.14,'#34485b');ctx.restore();
@@ -338,7 +416,7 @@ function drawRescue(t){
   if(t.key==='behind'){drawRobot(rx,ry-20);drawRock(rx,ry+2,36,.3);}else{drawRock(rx,ry-12,36,.3);drawRobot(rx,ry+4);}
   ctx.strokeStyle='#7de2d780';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(rx,t.y+13,38,12,0,0,Math.PI*2);ctx.stroke();
   const beam=ctx.createLinearGradient(0,t.y-12,0,t.y+13);beam.addColorStop(0,'#91ead500');beam.addColorStop(1,'#91ead540');path([[rx-25,t.y-15],[rx+25,t.y-15],[rx+38,t.y+13],[rx-38,t.y+13]],beam);
-  ctx.font='10px ui-monospace,monospace';ctx.textAlign='center';ctx.fillStyle='#a1d4cf';ctx.fillText('RESCUE '+(t.slot===0?'A':'B'),rx,t.y+43);ctx.restore();
+  ctx.font='600 19px -apple-system, sans-serif';ctx.textAlign='center';ctx.fillStyle='#bde9e1';ctx.fillText(VOCABULARY[t.key].word,rx,t.y+49);ctx.restore();
 }
 function drawBoss(){
   const x=width*.5,y=fieldTop()+8;
@@ -347,7 +425,7 @@ function drawBoss(){
   roundedRect(-53,-31,106,67,18,'#34445d','#78869d');roundedRect(-38,-19,76,29,10,'#101e35');roundedRect(-26,-9,19,9,4,'#e7ce8b');roundedRect(7,-9,19,9,4,'#e7ce8b');
   for(let i=0;i<3;i++)roundedRect(-23+i*18,20,10,4,2,i<3-(state.index-5)?'#c7ef96':'#506075');
   ctx.strokeStyle='#bfdc9a24';ctx.beginPath();ctx.ellipse(0,0,119,58,0,0,Math.PI*2);ctx.stroke();ctx.restore();
-  for(const t of targets){if(!t.active)continue;const color=COLORS[t.key];ctx.globalAlpha=t.cooldown>0?.4:1;circle(t.x,t.y,35,color+'13',color+'44');circle(t.x,t.y,24,color+'30',color);drawStar(t.x,t.y,13,color);ctx.globalAlpha=1;}
+  for(const t of targets){if(!t.active)continue;const color=COLORS[t.key];ctx.globalAlpha=t.cooldown>0?.4:1;circle(t.x,t.y,35,color+'13',color+'44');circle(t.x,t.y,24,color+'30',color);drawStar(t.x,t.y,13,color);ctx.fillStyle=color;ctx.font='700 21px -apple-system, sans-serif';ctx.textAlign='center';ctx.fillText(t.key,t.x,t.y+57);ctx.globalAlpha=1;}
 }
 function draw(dt){
   drawBackground(dt);
@@ -356,7 +434,7 @@ function draw(dt){
   if(m.kind==='boss')drawBoss();
   for(const t of targets){
     if(!t.active)continue;
-    if(m.kind==='collect'){circle(t.x,t.y,34,'#e9d3880b','#e9d38828');drawStar(t.x,t.y,21+Math.sin(ambient*2+t.slot)*2,'#f0d991');}
+    if(m.kind==='collect'){circle(t.x,t.y,34,'#e9d3880b','#e9d38828');drawStar(t.x,t.y,21+Math.sin(ambient*2+t.slot)*2,'#f0d991');ctx.fillStyle='#f0d991';ctx.font='600 19px -apple-system, sans-serif';ctx.textAlign='center';ctx.fillText('star',t.x,t.y+53);}
     else if(m.kind==='color')drawDrone(t);
     else if(m.kind==='position')drawRescue(t);
   }
@@ -373,4 +451,4 @@ function frame(now){
 requestAnimationFrame(frame);
 
 // Read-only snapshot for browser interaction tests; contains no player identity.
-export function inspectGame(){return JSON.parse(JSON.stringify({mode:state.mode,index:state.index,count:state.count,goal:mission().goal,score:state.score,hearts:state.hearts,elapsed:state.elapsed,transition:state.transition,shield:state.shield,shieldCooldown:state.shieldCooldown,mistakes:state.runMistakes,replays:state.runReplays,settings,ship,targets,hazards:hazards.map(h=>({...h,effectiveSpeed:h.vy*settings.meteorSpeed})),progress}));}
+export function inspectGame(){return JSON.parse(JSON.stringify({mode:state.mode,index:state.index,count:state.count,goal:mission().goal,score:state.score,hearts:state.hearts,elapsed:state.elapsed,transition:state.transition,shield:state.shield,shieldCooldown:state.shieldCooldown,mistakes:state.runMistakes,replays:state.runReplays,settings,ship,targets,hazards:hazards.map(h=>({...h,effectiveSpeed:h.vy*settings.meteorSpeed})),progress,reading,seenWords:[...seenWords],quiz:quiz?{key:quiz.key,index:quiz.index,order:quiz.order,options:quiz.options,answered:quiz.answered,firstTry:quiz.firstTry,finished:quiz.finished}:null}));}

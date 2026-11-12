@@ -22,6 +22,14 @@ async function flyTo(x,y){
 }
 async function shot(name){const r=await cdp('Page.captureScreenshot',{format:'png'});await fs.writeFile(new URL(name,output),Buffer.from(r.data,'base64'));}
 async function assertVisible(selector){assert.equal(await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=innerWidth})()`),true);}
+async function assertFits(selector){assert.equal(await evaluate(`(()=>{const panel=document.querySelector('#modal-content'),r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(),p=panel.getBoundingClientRect();return r.bottom<=p.bottom&&r.top>=p.top&&panel.scrollHeight<=panel.clientHeight+2})()`),true,selector+' fits without scrolling');}
+async function dismissLesson(){
+  const before=await snapshot();assert.equal(before.mode,'learning');
+  await assertFits('#word-continue');await sleep(350);const after=await snapshot();
+  assert.equal(after.elapsed,before.elapsed);assert.equal(after.count,before.count);assert.equal(after.hearts,before.hearts);
+  assert.deepEqual(after.hazards,before.hazards);
+  await tap('#word-continue');
+}
 
 try{
   await cdp('Page.enable');await cdp('Runtime.enable');
@@ -29,7 +37,7 @@ try{
   await cdp('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});await cdp('Emulation.setFocusEmulationEnabled',{enabled:true});
   await cdp('Page.navigate',{url:'http://127.0.0.1:4173/'});
   await waitFor(()=>evaluate("document.readyState==='complete'"),'page ready');
-  await evaluate(`localStorage.setItem('starling-progress-v1',JSON.stringify({version:1,runs:2,records:{red:{completed:2,firstTry:1,mistakes:1,replays:2}}}));localStorage.removeItem('starling-difficulty-v1')`);
+  await evaluate(`localStorage.setItem('starling-progress-v1',JSON.stringify({version:1,runs:2,records:{red:{completed:2,firstTry:1,mistakes:1,replays:2}}}));localStorage.removeItem('starling-difficulty-v1');localStorage.removeItem('starling-reading-v1')`);
   await cdp('Page.reload');await sleep(500);
   assert.equal((await snapshot()).settings.targetHits,6);assert.equal((await snapshot()).progress.runs,2);
   await shot('01-home-ipad.png');await tap('#difficulty');await shot('02-difficulty-ipad.png');
@@ -49,7 +57,13 @@ try{
   await tap('#save-difficulty');assert.deepEqual((await snapshot()).settings,{meteorSpeed:2,meteorCount:6,targetHits:20});
   await cdp('Page.reload');await sleep(500);assert.equal((await snapshot()).settings.targetHits,20);assert.equal((await snapshot()).progress.runs,2);
   await tap('#difficulty');await tap('[data-preset=training]');await tap('#cancel-difficulty');assert.equal((await snapshot()).settings.targetHits,20);
+  await tap('#open-words');await assertFits('#library-quiz');await shot('reading-library-ipad.png');
+  await tap('[data-card=behind]');await assertFits('#word-continue');await shot('reading-behind-card.png');
+  assert.equal(await evaluate("document.querySelector('#modal-title').textContent"),'behind');
+  await tap('#word-speak');await tap('#word-continue');await tap('#library-close');
   await tap('#start');await tap('#begin');
+  assert.equal(await evaluate("document.querySelector('#modal-title').textContent"),'star');
+  await shot('reading-first-word.png');await dismissLesson();
   const firstWave=await waitFor(async()=>{const s=await snapshot();return s.hazards.length?s.hazards:null;},'six meteors in a wave');
   assert.equal(firstWave.length,6);assert.ok(firstWave.every(h=>h.effectiveSpeed===130));
   await shot('03-six-meteors.png');
@@ -59,11 +73,16 @@ try{
   await tap('#resume');
   for(let i=0;i<6;i++){const current=await snapshot();if(current.index!==0||current.transition>0)break;const t=current.targets.find(t=>t.active);if(!t)break;await flyTo(t.x,t.y);await sleep(300);}
   await waitFor(async()=>(await snapshot()).index===1,'collect complete');assert.equal((await snapshot()).goal,6);
+  await dismissLesson();
+  assert.equal(await evaluate("document.querySelector('#instruction mark').textContent"),'red');
+  assert.ok(await evaluate("document.querySelector('#focus-word').textContent.includes('红色')"));
+  await tap('#focus-word');await dismissLesson();await shot('reading-battle-labels.png');
   console.log('Touch settings, 20-hit boundary, persistence, cancellation, six-meteor waves and live speed change: passed');
   let quotaChanged=false,lastIndex=-1,start=Date.now(),lastSlot=null,lastCount=-1,layoutChanges=0;
   while(Date.now()-start<210000){
     const s=await snapshot();
     if(s.mode==='results')break;
+    if(s.mode==='learning'){await dismissLesson();continue;}
     if(s.mode==='repair'){await tap('#repair');continue;}
     assert.equal(s.mode,'playing');
     if(s.index!==lastIndex){console.log('Mission',s.index,'quota',s.goal);lastIndex=s.index;lastSlot=null;lastCount=-1;}
@@ -84,10 +103,26 @@ try{
   }
   const final=await snapshot();assert.equal(final.mode,'results');assert.ok(quotaChanged);assert.ok(layoutChanges>=10);
   assert.equal(final.progress.runs,3);assert.equal(final.progress.records.red.completed,4);assert.equal(final.progress.records.green.completed,1);
-  await shot('05-complete-ipad.png');await tap('#result-home');await cdp('Page.reload');await sleep(500);assert.equal((await snapshot()).settings.targetHits,4);assert.equal((await snapshot()).progress.runs,3);
+  assert.deepEqual(new Set(final.seenWords),new Set(['stars','red','blue','behind','front','green']));
+  await shot('05-complete-ipad.png');
+  await tap('[data-result-word=red]');await tap('#word-continue');assert.equal((await snapshot()).progress.runs,3);
+  await tap('#result-reading');await assertFits('#quiz-next');await shot('reading-quiz-ipad.png');
+  for(let i=0;i<6;i++){
+    const s=await snapshot();assert.equal(s.quiz.index,i);assert.equal(await evaluate("document.querySelector('#quiz-next').disabled"),true);
+    if(i===0){const wrong=s.quiz.options.find(k=>k!==s.quiz.key);await tap(`[data-choice=${wrong}]`);assert.equal(await evaluate(`document.querySelector('[data-choice=${wrong}]').disabled`),true);assert.equal((await snapshot()).quiz.answered,false);await shot('reading-retry-feedback.png');}
+    await tap(`[data-choice=${s.quiz.key}]`);assert.equal((await snapshot()).quiz.answered,true);await tap('#quiz-next');
+  }
+  let reading=(await snapshot()).reading;assert.equal(reading.sessions,1);assert.equal(Object.values(reading.records).reduce((n,r)=>n+r.completed,0),6);assert.equal(Object.values(reading.records).reduce((n,r)=>n+r.firstTry,0),5);
+  await shot('reading-quiz-results.png');await tap('[data-review-card=front]');await tap('#word-continue');assert.equal((await snapshot()).reading.sessions,1);
+  await tap('#reading-done');assert.equal((await snapshot()).progress.runs,3);await tap('#result-home');
+  await cdp('Page.reload');await sleep(500);assert.equal((await snapshot()).settings.targetHits,4);assert.equal((await snapshot()).progress.runs,3);assert.deepEqual((await snapshot()).reading,reading);
   await cdp('Emulation.setDeviceMetricsOverride',{width:1133,height:744,deviceScaleFactor:1,mobile:true});await sleep(250);await tap('#difficulty');await assertVisible('#save-difficulty');await shot('06-difficulty-ipad-mini.png');await tap('#difficulty-close');
+  await tap('#open-words');await assertFits('#library-quiz');await tap('[data-card=front]');await assertFits('#word-continue');await shot('reading-front-ipad-mini.png');await tap('#word-continue');await tap('#library-quiz');await assertFits('#quiz-next');await shot('reading-quiz-ipad-mini.png');await tap('#quiz-exit');await tap('#library-close');
   await cdp('Emulation.setDeviceMetricsOverride',{width:768,height:1024,deviceScaleFactor:1,mobile:true});await sleep(250);await tap('#dismiss-rotate');await tap('#difficulty');await assertVisible('#save-difficulty');await shot('07-difficulty-portrait.png');
+  await tap('#difficulty-close');await tap('#open-words');await assertFits('#library-quiz');await shot('reading-library-portrait.png');await tap('#library-close');
+  await tap('#open-parent');await shot('reading-parent-records.png');await tap('#clear-progress');await tap('#keep-records');assert.deepEqual((await snapshot()).reading,reading);
+  await tap('#clear-progress');await tap('#confirm-clear');assert.equal((await snapshot()).reading.sessions,0);assert.deepEqual((await snapshot()).reading.records,{});assert.equal((await snapshot()).progress.runs,0);assert.equal((await snapshot()).settings.targetHits,4);
   assert.deepEqual(errors,[]);
-  await fs.writeFile(new URL('browser-result.json',output),JSON.stringify({passed:true,checks:['touch controls','saved difficulty survives reload','cancel leaves settings unchanged','six-meteor wave','live speed multiplier','mid-task quota preserved','next-task quota updated','targets change lanes','multi-hit Boss completes','learning history preserved'],layoutChanges,errors,final},null,2));
+  await fs.writeFile(new URL('browser-result.json',output),JSON.stringify({passed:true,checks:['touch controls','saved difficulty survives reload','cancel leaves settings unchanged','six-meteor wave','live speed multiplier','mid-task quota preserved','next-task quota updated','targets change lanes','multi-hit Boss completes','learning history preserved','six automatic word lessons','word card freezes hazards and clock','highlighted task words','word library','quiz retry feedback','first-try recognition records','review does not duplicate counts','reading persistence','clear all learning records','iPad word layouts'],layoutChanges,errors,final,reading},null,2));
   console.log('In-progress quota, next-task quota, repeated Boss hits, complete run and iPad layouts: passed');
 }finally{ws.close();}
